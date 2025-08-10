@@ -1,0 +1,12 @@
+[project]
+name = "streamlit-chat-ui"
+version = "0.1.0"
+description = "Streamlit chat UI scaffold"
+requires-python = ">=3.11"
+
+dependencies = [
+    "streamlit==1.36.0"
+]
+
+[tool.uv]
+# Optional: pinning index or cache settings goes here
