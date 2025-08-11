@@ -22,7 +22,7 @@ def main() -> None:
     inject_css()
     init_state()
 
-    # Header
+    # Header (greeting + subheader)
     render_header(name="Marc")
 
     # Sidebar
@@ -33,16 +33,26 @@ def main() -> None:
             st.rerun()
 
         models = list_models_safe()
-        # Ensure the selectbox value is valid before rendering it
-        if st.session_state.current_model not in models:
+
+        # Ensure there's always a valid model in session state
+        if (
+            "current_model" not in st.session_state
+            or st.session_state.current_model not in models
+        ):
             st.session_state.current_model = models[0] if models else ""
 
-        st.selectbox(
+        # Selectbox (readonly list) bound to session_state
+        selected_model = st.selectbox(
             "Model",
-            models,
-            key="current_model",
+            options=models,
+            index=(
+                models.index(st.session_state.current_model)
+                if st.session_state.current_model in models and models
+                else 0
+            ),
             help="Ollama models installed locally.",
         )
+        st.session_state.current_model = selected_model
 
         render_history()
 

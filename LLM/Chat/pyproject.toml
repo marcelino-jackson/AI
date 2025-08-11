@@ -2,10 +2,11 @@
 name = "streamlit-chat-ui"
 version = "0.1.0"
 description = "Streamlit chat UI scaffold"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 
 dependencies = [
-    "streamlit==1.36.0"
+    "streamlit==1.36.0",
+    "watchdog>=4.0.2",
 ]
 
 [tool.uv]
