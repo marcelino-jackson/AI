@@ -1,12 +1,18 @@
 from __future__ import annotations
-import streamlit as st
+import time
+from datetime import datetime
 from typing import Any, Dict
+
+import streamlit as st
+
 from utils import greeting_for_now
+from state import append_exchange, get_current_model
+from services.ollama_client import generate_with_progress
+
 
 # ---------- Header ----------
 
 def render_header(name: str) -> None:
-    """Top greeting + subtle divider + centered subheading."""
     st.markdown(
         f"""<h1 style='text-align:center;margin-top:0.25rem;'>{greeting_for_now(name)}</h1>""",
         unsafe_allow_html=True,
@@ -16,6 +22,7 @@ def render_header(name: str) -> None:
         "<p style='text-align:center;opacity:0.75;font-size:1.15rem;'>Start a conversation below.</p>",
         unsafe_allow_html=True,
     )
+
 
 # ---------- History ----------
 
@@ -42,21 +49,15 @@ def render_history() -> None:
                     )
                     st.rerun()
 
+
 # ---------- Messages ----------
 
 def _render_message(msg: Dict[str, Any]) -> None:
-    avatar = "👤" if msg["role"] == "user" else "🤖"
-    with st.chat_message(msg["role"], avatar=avatar):
-        # timestamp (top-right inside bubble)
-        st.markdown(
-            f"<span class='msg-ts'>{msg.get('time','')}</span>",
-            unsafe_allow_html=True,
-        )
-        if msg.get("content"):
-            st.markdown(msg["content"], help="Markdown supported.")
-        if msg["role"] == "assistant" and msg.get("content"):
-            with st.expander("Copy text"):
-                st.code(msg["content"])
+    role = msg["role"]
+    avatar = "👤" if role == "user" else "🤖"
+    with st.chat_message(role, avatar=avatar):
+        content = msg.get("content", "")
+        st.markdown(content, unsafe_allow_html=True)
         if msg.get("attachments"):
             with st.expander("Attachments"):
                 for i, f in enumerate(msg["attachments"], start=1):
@@ -66,23 +67,21 @@ def _render_message(msg: Dict[str, Any]) -> None:
 
 def render_messages() -> None:
     if not st.session_state.messages:
-        # Header already shows the "Start a conversation below." hint
-        pass
+        return
     for msg in st.session_state.messages:
         _render_message(msg)
 
-# ---------- Composer ----------
 
+# ---------- Composer ----------
 def render_composer(on_send):
     """
-    Bottom composer with:
-      - left: attachments button (centered vertically)
-      - right: chat_input sized by CSS; text left-aligned; Shift+Enter for newline
+    - Left: attachments toggle
+    - Right: chat input (submit via Enter / send icon)
     """
-    bottom = st.empty()
+    below_prompt = st.container()
 
-    # Keep the icon aligned to the middle of the (CSS-sized) input container
-    col_clip, col_input = st.columns([0.09, 0.91], vertical_alignment="center")
+    # Wider clip column (~avatar width) so the input lines up with bubbles WITHOUT negative margins
+    col_clip, col_input = st.columns([0.095, 0.905], vertical_alignment="center")
 
     with col_clip:
         if st.button("📎", key="attach_btn", help="Add attachments", use_container_width=True):
@@ -102,8 +101,69 @@ def render_composer(on_send):
             if files:
                 st.session_state.attachments_buffer = files
 
-    if prompt is not None:
-        on_send(prompt, st.session_state.attachments_buffer)
+    if prompt is not None and prompt.strip():
+        model = get_current_model()
+        now_ts = datetime.now().strftime("%H:%M")
+
+        user_block = f"""
+<div class="section-header">
+  <div class="section-title">Prompting… <span class="model-chip">{model}</span></div>
+  <div class="section-meta">{now_ts}</div>
+</div>
+{prompt}
+""".strip()
+
+        # Timing (prefer first-token → end)
+        t_start_wall = time.perf_counter()
+        first_token_time: float | None = None
+
+        with below_prompt:
+            with st.container(border=True):
+                with st.expander(f"Thinking…  \u00A0\u00A0{now_ts}", expanded=True):
+                    st.markdown("_Let's write._")
+                    stream_placeholder = st.empty()
+                    progress_widget = st.progress(0)
+                    status = st.empty()
+
+                    collected: list[str] = []
+                    progress_val = 0
+
+                    def on_chunk(chunk: str):
+                        nonlocal progress_val, first_token_time
+                        if first_token_time is None:
+                            first_token_time = time.perf_counter()
+                        collected.append(chunk)
+                        stream_placeholder.markdown("".join(collected))
+                        progress_val = min(95, progress_val + 2)
+                        progress_widget.progress(progress_val)
+                        status.info(f"Running **{model}**…")
+
+                    try:
+                        final_text = generate_with_progress(model, prompt, on_chunk=on_chunk)
+                        progress_widget.progress(100)
+                        status.success("Completed")
+                        st.markdown("…done thinking.")
+                    except Exception as e:
+                        progress_widget.progress(100)
+                        status.error("Failed")
+                        final_text = f"**Error:** {e}"
+                        st.markdown("…done thinking.")
+
+        t_end = time.perf_counter()
+        if first_token_time is not None:
+            elapsed = t_end - first_token_time
+        else:
+            elapsed = t_end - t_start_wall
+        elapsed_str = f"{elapsed:.2f}s"
+
+        assistant_block = f"""
+<div class="section-header">
+  <div class="section-title">Results from <span class="model-chip">{model}</span></div>
+  <div class="section-meta">{elapsed_str}</div>
+</div>
+{final_text}
+""".strip()
+
+        append_exchange(user_block, assistant_block, getattr(st.session_state, "attachments_buffer", []))
         st.session_state.attachments_buffer = []
-        bottom.write("")
         st.rerun()

@@ -2,38 +2,54 @@ from __future__ import annotations
 import streamlit as st
 from datetime import datetime
 
-PRIMARY_MAX_WIDTH = 920
-USER_BG = "#1f2937"      # slate-800
-ASSIST_BG = "#111827"    # gray-900
+PRIMARY_MAX_WIDTH = 1200
+USER_BG = "#1f2937"
+ASSIST_BG = "#111827"
 BORDER = "#2a2f3a"
 
 def inject_css() -> None:
+    """Global styling for hamburger, boxes, headers, prompt, and sidebar spacing."""
     st.markdown(
         f"""
         <style>
-        /* Layout width */
+        /* Center main content */
         .block-container {{
             max-width: {PRIMARY_MAX_WIDTH}px;
             margin: 0 auto;
         }}
 
-        /* Hide toolbar (Deploy, etc.) */
+        /* Hide Streamlit toolbar (Deploy, etc.) */
         [data-testid="stToolbar"],
         header [data-testid="stHeaderActionElements"] {{
             display: none !important;
             visibility: hidden !important;
         }}
 
-        /* Sidebar width */
-        section[data-testid="stSidebar"] {{
-            width: 16rem !important;
+        /* ======== Sidebar padding & spacing ======== */
+        section[data-testid="stSidebar"] > div:first-child {{
+            padding-right: 16px;               /* keep controls away from main column */
+        }}
+        section[data-testid="stSidebar"] .stButton {{
+            margin-bottom: 20px !important;    /* gap after + New button */
+        }}
+        section[data-testid="stSidebar"] label {{
+            margin-top: 8px !important;        /* space before "Model" label */
+            margin-bottom: 6px !important;
+        }}
+        section[data-testid="stSidebar"] [data-baseweb="select"] {{
+            margin-bottom: 24px !important;    /* space before History */
+        }}
+        section[data-testid="stSidebar"] .stButton > button,
+        section[data-testid="stSidebar"] [data-baseweb="select"] {{
+            width: 100% !important;
+            box-sizing: border-box;
         }}
 
-        /* Chat bubbles */
+        /* ======== Chat bubbles ======== */
         [data-testid="stChatMessage"] {{
             border: 1px solid {BORDER};
             border-radius: 8px;
-            padding: 10px 14px;
+            padding: 14px 16px;
             margin: 8px 0 16px 0;
             background: {ASSIST_BG};
         }}
@@ -41,74 +57,104 @@ def inject_css() -> None:
             background: {USER_BG};
         }}
 
-        /* Timestamp inline */
-        .msg-ts {{
-            float: right;
-            opacity: 0.6;
-            font-size: 0.8rem;
+        /* ======== Single-row section headers (Prompting / Results) ======== */
+        [data-testid="stChatMessage"] .section-header {{
+            width: 100%;
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }}
+        [data-testid="stChatMessage"] .section-title {{
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: 0.2px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        [data-testid="stChatMessage"] .section-meta {{
+            margin-left: auto;
+            opacity: 0.7;
+            font-size: 0.95rem;
+            white-space: nowrap;
+        }}
+        [data-testid="stChatMessage"] .model-chip {{
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.18);
+            background: rgba(255,255,255,0.06);
+            font-weight: 600;
+            font-size: 0.95rem;
+            line-height: 1.2;
+        }}
+        [data-testid="stChatMessage"] p {{
+            margin-top: 0.15rem;
         }}
 
-        /* ===========================================
-           PROMPT (chat input) — rectangular box
-           =========================================== */
-
-        /* Outer container of st.chat_input */
+        /* ======== Prompt (chat input) — rectangular and aligned ======== */
+        /* IMPORTANT: remove the previous negative margin so it doesn't overlap the sidebar */
+        div[data-testid="stChatInput"] {{
+            margin-left: 0;                     /* was -72px */
+            width: 100% !important;             /* no overflow into sidebar */
+        }}
         div[data-testid="stChatInput"] > div {{
             display: flex;
-            align-items: center;            /* vertical center icon/text/send */
-            min-height: 96px;               /* bigger than default */
-            padding: 0 14px;
+            align-items: center;
+            min-height: 116px;
+            padding: 0 16px;
             width: 100% !important;
 
-            /* Force rectangular corners */
             border-radius: 8px !important;
-            overflow: hidden;               /* clip inner rounded corners */
+            overflow: hidden;
             border: 1px solid rgba(255,255,255,0.15);
             background-color: rgba(255,255,255,0.04);
             box-shadow: none !important;
         }}
-
-        /* Some inner BaseWeb wrappers add their own radius—neutralize them */
         div[data-testid="stChatInput"] [data-baseweb],
         div[data-testid="stChatInput"] [data-baseweb] * {{
             border-radius: 0 !important;
         }}
-
-        /* The immediate input wrappers sometimes carry rounded corners */
-        div[data-testid="stChatInput"] [data-baseweb="base-input"],
-        div[data-testid="stChatInput"] [data-baseweb="textarea"],
-        div[data-testid="stChatInput"] div[role="textbox"] {{
-            border-radius: 0 !important;
-            background: transparent !important;
-        }}
-
-        /* Textarea styling (keep user text left-aligned) */
         div[data-testid="stChatInput"] textarea {{
-            min-height: 72px !important;    /* tall inner area so it looks balanced */
+            min-height: 92px !important;
             padding-top: 0;
             padding-bottom: 0;
             margin: 0;
-            font-size: 1.0rem;
-            line-height: 1.5rem;
+            font-size: 1.05rem;
+            line-height: 1.6rem;
             text-align: left;
             resize: none;
             background-color: transparent;
         }}
-
-        /* Keep placeholder left-aligned */
         div[data-testid="stChatInput"] textarea::placeholder {{
             text-align: left;
         }}
-
-        /* Focus state (subtle) */
-        div[data-testid="stChatInput"] > div:focus-within {{
-            border-color: rgba(255,255,255,0.25);
-            box-shadow: 0 0 0 2px rgba(255,255,255,0.08);
-        }}
-
-        /* Ensure any buttons inside chat_input (send, etc.) are centered */
         div[data-testid="stChatInput"] button {{
             align-self: center;
+        }}
+
+        /* ======== Hamburger column ======== */
+        .hamburger-wrap {{
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: center;
+            padding-top: 8px;
+        }}
+        .hamburger-wrap .stButton > button {{
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.12);
+            font-size: 18px;
+            line-height: 1;
+        }}
+        .hamburger-wrap .stButton > button:hover {{
+            background: rgba(255,255,255,0.10);
         }}
         </style>
         """,

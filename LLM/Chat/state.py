@@ -12,7 +12,6 @@ def init_state() -> None:
     if "history" not in st.session_state:
         st.session_state.history: List[Dict[str, Any]] = []
     if "current_model" not in st.session_state:
-        # Actual value gets set in app.py once models are discovered
         st.session_state.current_model = DEFAULT_MODEL
     if "chat_title" not in st.session_state:
         st.session_state.chat_title = "New chat"
@@ -20,6 +19,10 @@ def init_state() -> None:
         st.session_state.show_uploader = False
     if "attachments_buffer" not in st.session_state:
         st.session_state.attachments_buffer = []
+    if "sidebar_open" not in st.session_state:
+        st.session_state.sidebar_open = True
+    if "last_result" not in st.session_state:
+        st.session_state.last_result = ""
 
 # ---------- Global accessors for the selected model ----------
 def get_current_model() -> str:
@@ -30,7 +33,30 @@ def set_current_model(model_name: str) -> None:
     """Update the selected model in a single place."""
     st.session_state.current_model = model_name
 
-# ---------- Chat state actions ----------
+# ---------- Chat state helpers ----------
+def append_exchange(user_text: str, assistant_text: str, attachments: List[Any] | None = None) -> None:
+    """Append a user/assistant message pair to chat history.
+
+    We stamp BOTH messages with the model used so the UI can show a unified header.
+    """
+    attachments = attachments or []
+    model = get_current_model()
+    now = datetime.now().strftime("%H:%M")
+    st.session_state.messages.append({
+        "role": "user",
+        "content": user_text,   # already includes our 'Prompting…' header markup
+        "time": now,
+        "attachments": attachments,
+        "model": model,
+    })
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": assistant_text,  # already includes our 'Results from…' header markup
+        "time": now,
+        "attachments": [],
+        "model": model,
+    })
+
 def new_chat() -> None:
     """Archive current chat to history and start a new one."""
     if st.session_state.messages:
@@ -41,24 +67,27 @@ def new_chat() -> None:
             "model": get_current_model(),
         })
     st.session_state.messages = []
+    st.session_state.last_result = ""
     st.session_state.chat_title = datetime.now().strftime("Chat %b %d, %I:%M %p")
 
+# Back-compat (kept, not used by the new flow)
 def send_message(user_text: str, attachments: List[Any] | None = None) -> None:
-    """Append a user message and a placeholder assistant reply."""
     if not user_text and not attachments:
         return
-
+    attachments = attachments or []
+    model = get_current_model()
+    now = datetime.now().strftime("%H:%M")
     st.session_state.messages.append({
         "role": "user",
         "content": user_text,
-        "time": datetime.now().strftime("%H:%M"),
-        "attachments": attachments or [],
+        "time": now,
+        "attachments": attachments,
+        "model": model,
     })
-
-    # TODO: replace with real call to Ollama using get_current_model()
     st.session_state.messages.append({
         "role": "assistant",
         "content": "_Stub reply:_ Message received. Wire Ollama next.",
-        "time": datetime.now().strftime("%H:%M"),
+        "time": now,
         "attachments": [],
+        "model": model,
     })
