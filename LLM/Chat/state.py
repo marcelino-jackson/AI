@@ -1,93 +1,67 @@
-from __future__ import annotations
 import streamlit as st
-from datetime import datetime
-from typing import Any, Dict, List
+from services.ollama_client import get_models, generate_text
 
-DEFAULT_MODEL = ""
 
-def init_state() -> None:
-    """Initialize all session_state keys we rely on."""
+def initialize_session_state():
     if "messages" not in st.session_state:
-        st.session_state.messages: List[Dict[str, Any]] = []
-    if "history" not in st.session_state:
-        st.session_state.history: List[Dict[str, Any]] = []
+        st.session_state.messages = []
+
     if "current_model" not in st.session_state:
-        st.session_state.current_model = DEFAULT_MODEL
-    if "chat_title" not in st.session_state:
-        st.session_state.chat_title = "New chat"
-    if "show_uploader" not in st.session_state:
-        st.session_state.show_uploader = False
-    if "attachments_buffer" not in st.session_state:
-        st.session_state.attachments_buffer = []
-    if "sidebar_open" not in st.session_state:
-        st.session_state.sidebar_open = True
-    if "last_result" not in st.session_state:
-        st.session_state.last_result = ""
+        models = get_models_list()
+        st.session_state.current_model = models[0] if models else None
 
-# ---------- Global accessors for the selected model ----------
-def get_current_model() -> str:
-    """Read the currently selected model anywhere in the app."""
-    return st.session_state.get("current_model", DEFAULT_MODEL)
+    if "models_list" not in st.session_state:
+        st.session_state.models_list = []
 
-def set_current_model(model_name: str) -> None:
-    """Update the selected model in a single place."""
+    if "last_input" not in st.session_state:
+        st.session_state.last_input = ""
+
+
+def get_current_model():
+    return st.session_state.get("current_model")
+
+
+def set_current_model(model_name):
     st.session_state.current_model = model_name
 
-# ---------- Chat state helpers ----------
-def append_exchange(user_text: str, assistant_text: str, attachments: List[Any] | None = None) -> None:
-    """Append a user/assistant message pair to chat history.
 
-    We stamp BOTH messages with the model used so the UI can show a unified header.
-    """
-    attachments = attachments or []
-    model = get_current_model()
-    now = datetime.now().strftime("%H:%M")
-    st.session_state.messages.append({
-        "role": "user",
-        "content": user_text,   # already includes our 'Prompting…' header markup
-        "time": now,
-        "attachments": attachments,
-        "model": model,
-    })
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": assistant_text,  # already includes our 'Results from…' header markup
-        "time": now,
-        "attachments": [],
-        "model": model,
-    })
+def get_models_list():
+    if not st.session_state.get("models_list"):
+        try:
+            models = get_models()
+            st.session_state.models_list = models if models else []
+        except:
+            st.session_state.models_list = []
+    return st.session_state.models_list
 
-def new_chat() -> None:
-    """Archive current chat to history and start a new one."""
-    if st.session_state.messages:
-        st.session_state.history.append({
-            "id": datetime.utcnow().isoformat(),
-            "title": st.session_state.chat_title or "Untitled chat",
-            "messages": st.session_state.messages.copy(),
-            "model": get_current_model(),
-        })
-    st.session_state.messages = []
-    st.session_state.last_result = ""
-    st.session_state.chat_title = datetime.now().strftime("Chat %b %d, %I:%M %p")
 
-# Back-compat (kept, not used by the new flow)
-def send_message(user_text: str, attachments: List[Any] | None = None) -> None:
-    if not user_text and not attachments:
-        return
-    attachments = attachments or []
-    model = get_current_model()
-    now = datetime.now().strftime("%H:%M")
-    st.session_state.messages.append({
-        "role": "user",
-        "content": user_text,
-        "time": now,
-        "attachments": attachments,
-        "model": model,
-    })
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": "_Stub reply:_ Message received. Wire Ollama next.",
-        "time": now,
-        "attachments": [],
-        "model": model,
-    })
+def append_message(role, content, model=None):
+    message = {
+        "role": role,
+        "content": content,
+        "model": model  # Store which model was used
+    }
+    st.session_state.messages.append(message)
+
+
+def send_message_with_model(user_message):
+    current_model = st.session_state.current_model
+
+    if not current_model:
+        return False
+
+    try:
+        # Add user message (no model needed for user messages)
+        append_message("user", user_message)
+
+        # Generate response with current model
+        response = generate_text(current_model, user_message)
+
+        if response:
+            # Add assistant message with model information
+            append_message("assistant", response, current_model)
+            return True
+        return False
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        return False

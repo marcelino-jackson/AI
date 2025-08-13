@@ -1,169 +1,133 @@
-from __future__ import annotations
-import time
-from datetime import datetime
-from typing import Any, Dict
-
 import streamlit as st
-
-from utils import greeting_for_now
-from state import append_exchange, get_current_model
-from services.ollama_client import generate_with_progress
+from utils import get_greeting
+from state import get_current_model, get_models_list, set_current_model
 
 
-# ---------- Header ----------
+def render_header():
+    user_name = "Marc"
+    greeting = get_greeting()
 
-def render_header(name: str) -> None:
+    # Greeting only (compact)
     st.markdown(
-        f"""<h1 style='text-align:center;margin-top:0.25rem;'>{greeting_for_now(name)}</h1>""",
-        unsafe_allow_html=True,
-    )
-    st.markdown("<hr style='opacity:0.15;margin:6px 0;'>", unsafe_allow_html=True)
-    st.markdown(
-        "<p style='text-align:center;opacity:0.75;font-size:1.15rem;'>Start a conversation below.</p>",
+        f"<h1 style='margin:0.25rem 0 0.1rem 0'>{greeting}, {user_name}</h1>",
         unsafe_allow_html=True,
     )
 
 
-# ---------- History ----------
+def render_sidebar():
+    with st.sidebar:
+        if st.button("+ New", key="new_chat", use_container_width=True):
+            st.session_state.messages = []
+            st.rerun()
 
-def render_history() -> None:
-    st.subheader("History")
-    if not st.session_state.history:
-        st.caption("No past chats yet.")
-        return
-    for i, chat in enumerate(reversed(st.session_state.history)):
-        label = chat.get("title") or f"Chat {i+1}"
-        with st.container(border=True):
-            cols = st.columns([0.75, 0.25])
-            with cols[0]:
-                st.write(label)
-                last_msg = (chat.get("messages") or [{}])[-1].get("content", "")
-                prev = " ".join(last_msg.split()[:10])
-                st.caption(prev + ("…" if prev else ""))
-            with cols[1]:
-                if st.button("Open", key=f"hist_{i}", use_container_width=True):
-                    st.session_state.messages = chat["messages"].copy()
-                    st.session_state.chat_title = label
-                    st.session_state.current_model = chat.get(
-                        "model", st.session_state.get("current_model")
-                    )
-                    st.rerun()
+        st.write("**Model**")
+        models = get_models_list()
+        current_model = get_current_model()
 
+        if not models:
+            st.error("No models available")
+        else:
+            selected_model = st.selectbox(
+                "Choose model",
+                options=models,
+                index=models.index(current_model) if current_model in models else 0,
+                key="model_selector",
+            )
+            if selected_model != current_model:
+                set_current_model(selected_model)
+                st.rerun()
 
-# ---------- Messages ----------
-
-def _render_message(msg: Dict[str, Any]) -> None:
-    role = msg["role"]
-    avatar = "👤" if role == "user" else "🤖"
-    with st.chat_message(role, avatar=avatar):
-        content = msg.get("content", "")
-        st.markdown(content, unsafe_allow_html=True)
-        if msg.get("attachments"):
-            with st.expander("Attachments"):
-                for i, f in enumerate(msg["attachments"], start=1):
-                    st.write(
-                        f"{i}. {getattr(f, 'name', 'file')} ({getattr(f, 'type', 'unknown')})"
-                    )
-
-def render_messages() -> None:
-    if not st.session_state.messages:
-        return
-    for msg in st.session_state.messages:
-        _render_message(msg)
+        st.write("**History**")
+        st.write("No past chats yet.")
 
 
-# ---------- Composer ----------
-def render_composer(on_send):
-    """
-    - Left: attachments toggle
-    - Right: chat input (submit via Enter / send icon)
-    """
-    below_prompt = st.container()
+def render_chat_messages():
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-    # Wider clip column (~avatar width) so the input lines up with bubbles WITHOUT negative margins
-    col_clip, col_input = st.columns([0.095, 0.905], vertical_alignment="center")
+    chat_container = st.container()
+    with chat_container:
+        for message in st.session_state.messages:
+            role = message["role"]
+            content = message["content"]
+            model_used = message.get("model", "Unknown")
 
-    with col_clip:
-        if st.button("📎", key="attach_btn", help="Add attachments", use_container_width=True):
-            st.session_state.show_uploader = not st.session_state.show_uploader
+            if role == "user":
+                st.markdown(
+                    f'<div class="chat-message user" style="margin:0.08rem 0">{content}</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f"""
+                <div class="chat-message assistant" style="margin:0.08rem 0">
+                    <div class="model-badge">🤖 {model_used}</div>
+                    <div class="message-content">{content}</div>
+                </div>
+                """,
+                    unsafe_allow_html=True,
+                )
 
-    with col_input:
-        prompt = st.chat_input(
-            placeholder="Type your prompt here… (Enter to send, Shift+Enter for newline)",
-            key="composer",
+
+def render_composer():
+    current_model = get_current_model()
+
+    # Keep things compact; we’ll align the arrow with a column next to the textarea
+    composer_h = 72  # px; textarea height and arrow-cell height must match
+
+    st.markdown(
+        f"""
+        <style>
+        .block-container {{ padding-top: 0.5rem !important; padding-bottom: 0.15rem !important; }}
+        [data-testid="stVerticalBlock"] {{ gap: 0.15rem !important; }}
+        h1, h2, h3 {{ margin-top: 0.08rem !important; margin-bottom: 0.08rem !important; }}
+
+        /* Remove stray margins Streamlit adds */
+        .stMarkdown, .stTextArea, .stButton, .stSelectbox, .stContainer {{
+            margin: 0 !important; padding: 0 !important;
+        }}
+
+        /* Arrow column: same height as textarea, perfectly centered.
+           A tiny negative left margin pulls it visually closer to the prompt box. */
+        .arrow-cell {{
+            height: {composer_h}px;
+            display: flex; align-items: center; justify-content: center;
+            margin-left: -6px;
+        }}
+        .arrow-cell .stButton > button {{
+            width: 36px; height: 36px; border-radius: 50%; padding: 0;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Prompting line directly under greeting (tight)
+    if current_model:
+        st.markdown(f"### Prompting {current_model}...")
+    else:
+        st.markdown("### Prompting (no model selected)...")
+
+    # Two columns: textarea + arrow; arrow is center-right of the prompt row
+    input_col, arrow_col = st.columns([18, 2], gap="small")
+
+    with input_col:
+        user_input = st.text_area(
+            label="Message",
+            height=composer_h,
+            key="user_input",
+            placeholder="Type your prompt here...",
+            label_visibility="collapsed",
         )
 
-    if st.session_state.show_uploader:
-        with st.expander("Attachments (stub)", expanded=True):
-            files = st.file_uploader(
-                "Upload files", accept_multiple_files=True, label_visibility="collapsed"
-            )
-            if files:
-                st.session_state.attachments_buffer = files
+    with arrow_col:
+        st.markdown('<div class="arrow-cell">', unsafe_allow_html=True)
+        send_button = st.button(
+            "➤",
+            key="arrow_send_btn",
+            help="Send message",
+            use_container_width=False,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    if prompt is not None and prompt.strip():
-        model = get_current_model()
-        now_ts = datetime.now().strftime("%H:%M")
-
-        user_block = f"""
-<div class="section-header">
-  <div class="section-title">Prompting… <span class="model-chip">{model}</span></div>
-  <div class="section-meta">{now_ts}</div>
-</div>
-{prompt}
-""".strip()
-
-        # Timing (prefer first-token → end)
-        t_start_wall = time.perf_counter()
-        first_token_time: float | None = None
-
-        with below_prompt:
-            with st.container(border=True):
-                with st.expander(f"Thinking…  \u00A0\u00A0{now_ts}", expanded=True):
-                    st.markdown("_Let's write._")
-                    stream_placeholder = st.empty()
-                    progress_widget = st.progress(0)
-                    status = st.empty()
-
-                    collected: list[str] = []
-                    progress_val = 0
-
-                    def on_chunk(chunk: str):
-                        nonlocal progress_val, first_token_time
-                        if first_token_time is None:
-                            first_token_time = time.perf_counter()
-                        collected.append(chunk)
-                        stream_placeholder.markdown("".join(collected))
-                        progress_val = min(95, progress_val + 2)
-                        progress_widget.progress(progress_val)
-                        status.info(f"Running **{model}**…")
-
-                    try:
-                        final_text = generate_with_progress(model, prompt, on_chunk=on_chunk)
-                        progress_widget.progress(100)
-                        status.success("Completed")
-                        st.markdown("…done thinking.")
-                    except Exception as e:
-                        progress_widget.progress(100)
-                        status.error("Failed")
-                        final_text = f"**Error:** {e}"
-                        st.markdown("…done thinking.")
-
-        t_end = time.perf_counter()
-        if first_token_time is not None:
-            elapsed = t_end - first_token_time
-        else:
-            elapsed = t_end - t_start_wall
-        elapsed_str = f"{elapsed:.2f}s"
-
-        assistant_block = f"""
-<div class="section-header">
-  <div class="section-title">Results from <span class="model-chip">{model}</span></div>
-  <div class="section-meta">{elapsed_str}</div>
-</div>
-{final_text}
-""".strip()
-
-        append_exchange(user_block, assistant_block, getattr(st.session_state, "attachments_buffer", []))
-        st.session_state.attachments_buffer = []
-        st.rerun()
+    return send_button, user_input
